@@ -1,0 +1,25 @@
+# Зависимости
+node_modules/
+
+# Expo / сборка
+.expo/
+dist/
+web-build/
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+
+# Секреты — никогда не коммитим
+.env
+.env.*
+!.env.example
+
+# Supabase локально
+supabase/.temp/
+supabase/.branches/
+
+# Системное
+.DS_Store
+*.log
