@@ -1,14 +1,24 @@
 # Зависимости
 node_modules/
 
-# Expo / сборка
+# Expo
 .expo/
 dist/
 web-build/
+expo-env.d.ts
+
+# Нативные папки генерируются автоматически (EAS / prebuild)
+/ios
+/android
+.kotlin/
+*.orig.*
+
+# Ключи подписи и сертификаты
 *.jks
 *.p8
 *.p12
 *.key
+*.pem
 *.mobileprovision
 
 # Секреты — никогда не коммитим
@@ -20,6 +30,15 @@ web-build/
 supabase/.temp/
 supabase/.branches/
 
+# Metro / логи
+.metro-health-check*
+npm-debug.*
+yarn-debug.*
+yarn-error.*
+*.log
+
+# TypeScript
+*.tsbuildinfo
+
 # Системное
 .DS_Store
-*.log
