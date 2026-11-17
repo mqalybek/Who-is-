@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Лира → Тенге</title>
+<meta name="theme-color" content="#0f3d3e">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Лира→₸">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;800&family=JetBrains+Mono:wght@500&display=swap">
+<style>
+/* Макет: одна колонка, карточка-конвертер сверху, курс и история обновлений снизу */
+:root{
+  --bg:#f3f6f5; --surface:#ffffff; --fg:#0e1f1f; --muted:#5d7270;
+  --accent:#0f6b5c; --lira:#c8372d; --line:#dbe4e2; --ok:#1c8a4a; --warn:#b26a00;
+  --display:"Manrope",system-ui,sans-serif; --mono:"JetBrains Mono",ui-monospace,monospace;
+}
+@media (prefers-color-scheme:dark){:root{
+  --bg:#0b1414; --surface:#122020; --fg:#e7f1ef; --muted:#93aaa7;
+  --accent:#4fd1b5; --lira:#ff7a6e; --line:#22393a; --ok:#5dd38c; --warn:#f0b04a; color-scheme:dark}}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--fg);font-family:var(--display);-webkit-tap-highlight-color:transparent}
+body{padding:env(safe-area-inset-top,0) max(16px,env(safe-area-inset-right,0px)) env(safe-area-inset-bottom,0) max(16px,env(safe-area-inset-left,0px))}
+.wrap{max-width:460px;margin:0 auto;padding-block:20px 32px;display:flex;flex-direction:column;gap:16px}
+header{display:flex;justify-content:space-between;align-items:center}
+h1{font-size:20px;margin:0;font-weight:800;letter-spacing:-.01em}
+.status{font-size:12px;display:flex;align-items:center;gap:6px;color:var(--muted)}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--ok)}
+.dot.stale{background:var(--warn)} .dot.load{background:var(--muted);animation:p 1s infinite}
+@keyframes p{50%{opacity:.3}}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:20px;padding:18px;display:flex;flex-direction:column;gap:12px}
+.row label{font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);display:flex;justify-content:space-between}
+.field{display:flex;align-items:center;gap:10px;border-bottom:2px solid var(--line);padding-block:6px}
+.field:focus-within{border-color:var(--accent)}
+.field input{flex:1;min-width:0;border:0;background:transparent;color:var(--fg);font:800 34px/1.1 var(--display);outline:none;font-variant-numeric:tabular-nums}
+.cur{font-weight:800;font-size:22px}
+.cur.try{color:var(--lira)} .cur.kzt{color:var(--accent)}
+.swap{align-self:center;border:1px solid var(--line);background:var(--bg);color:var(--fg);border-radius:999px;padding:8px 16px;font:600 14px var(--display);cursor:pointer}
+.chips{display:flex;flex-wrap:wrap;gap:8px}
+.chips button{flex:1 0 auto;border:1px solid var(--line);background:var(--surface);color:var(--fg);border-radius:12px;padding:10px 12px;font:600 15px var(--display);cursor:pointer}
+.chips button:active,.swap:active{transform:scale(.97)}
+.rate{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.rate div{background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:14px}
+.rate small{display:block;font-size:12px;color:var(--muted);margin-bottom:4px}
+.rate b{font:500 18px var(--mono);font-variant-numeric:tabular-nums}
+.meta{font-size:12px;color:var(--muted);line-height:1.6}
+.meta button{border:0;background:none;color:var(--accent);font:600 12px var(--display);padding:0;cursor:pointer;text-decoration:underline}
+.err{color:var(--warn);font-size:13px}
+.table{background:var(--surface);border:1px solid var(--line);border-radius:16px;overflow:hidden}
+.table div{display:flex;justify-content:space-between;padding:10px 14px;border-top:1px solid var(--line);font:500 15px var(--mono);font-variant-numeric:tabular-nums}
+.table div:first-child{border-top:0}
+button:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+@media (prefers-reduced-motion:reduce){.dot.load{animation:none}}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.3.1/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.3.1/umd/react-dom.production.min.js"></script>
+<script>
+const h = React.createElement;
+const { useState, useEffect, useCallback } = React;
+const REFRESH_MS = 60_000; // автообновление раз в минуту
+
+// Источники курса (по очереди; если первый не ответил — берём следующий)
+const SOURCES = [
+  { name: "open.er-api.com", url: "https://open.er-api.com/v6/latest/TRY",
+    parse: j => ({ rate: j.rates.KZT, at: j.time_last_update_unix * 1000 }) },
+  { name: "currency-api (jsDelivr)", url: "https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest/v1/currencies/try.min.json",
+    parse: j => ({ rate: j.try.kzt, at: Date.parse(j.date) }) },
+  { name: "currency-api (mirror)", url: "https://latest.currency-api.pages.dev/v1/currencies/try.min.json",
+    parse: j => ({ rate: j.try.kzt, at: Date.parse(j.date) }) },
+];
+
+async function fetchRate() {
+  let lastErr;
+  for (const s of SOURCES) {
+    try {
+      const r = await fetch(s.url + (s.url.includes("?") ? "&" : "?") + "t=" + Date.now(), { cache: "no-store" });
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      const d = s.parse(await r.json());
+      if (!(d.rate > 0)) throw new Error("нет курса");
+      return { ...d, source: s.name, fetched: Date.now() };
+    } catch (e) { lastErr = e; }
+  }
+  throw lastErr;
+}
+
+const load = () => { try { return JSON.parse(localStorage.getItem("tryKzt")); } catch { return null; } };
+const save = v => { try { localStorage.setItem("tryKzt", JSON.stringify(v)); } catch {} };
+
+const fmt = (n, d = 2) => isFinite(n) ? n.toLocaleString("ru-RU", { minimumFractionDigits: 0, maximumFractionDigits: d }) : "";
+const parse = s => parseFloat(String(s).replace(/\s/g, "").replace(",", "."));
+const time = t => new Date(t).toLocaleString("ru-RU", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+
+function App() {
+  const [data, setData] = useState(load);
+  const [state, setState] = useState("load");
+  const [err, setErr] = useState("");
+  const [tryVal, setTryVal] = useState("1000");
+  const [dir, setDir] = useState("try"); // какое поле вводит пользователь
+
+  const refresh = useCallback(async () => {
+    setState("load");
+    try { const d = await fetchRate(); setData(d); save(d); setErr(""); setState("ok"); }
+    catch (e) { setErr("Нет связи, показываю последний сохранённый курс."); setState("stale"); }
+  }, []);
+
+  useEffect(() => {
+    refresh();
+    const id = setInterval(refresh, REFRESH_MS);
+    const vis = () => document.visibilityState === "visible" && refresh();
+    document.addEventListener("visibilitychange", vis);
+    return () => { clearInterval(id); document.removeEventListener("visibilitychange", vis); };
+  }, [refresh]);
+
+  const rate = data?.rate;
+  const [kztVal, setKztVal] = useState("");
+  const tryNum = dir === "try" ? parse(tryVal) : parse(kztVal) / rate;
+  const kztNum = dir === "try" ? parse(tryVal) * rate : parse(kztVal);
+
+  const tryShown = dir === "try" ? tryVal : (rate && isFinite(tryNum) ? fmt(tryNum) : "");
+  const kztShown = dir === "kzt" ? kztVal : (rate && isFinite(kztNum) ? fmt(kztNum) : "");
+
+  const field = (cur, value, onChange) => h("div", { className: "row" },
+    h("label", { htmlFor: "in-" + cur }, cur === "try" ? "Турецкая лира" : "Казахстанский тенге", h("span", null, cur.toUpperCase())),
+    h("div", { className: "field" },
+      h("input", { id: "in-" + cur, inputMode: "decimal", autoComplete: "off", value, placeholder: "0",
+        onChange: e => onChange(e.target.value) }),
+      h("span", { className: "cur " + cur }, cur === "try" ? "₺" : "₸")));
+
+  return h("div", { className: "wrap" },
+    h("header", null,
+      h("h1", null, "₺ → ₸"),
+      h("div", { className: "status" }, h("span", { className: "dot " + (state === "ok" ? "" : state) }),
+        state === "load" ? "обновляю…" : state === "ok" ? "онлайн" : "офлайн")),
+    h("div", { className: "card" },
+      field("try", tryShown, v => { setDir("try"); setTryVal(v); }),
+      h("button", { className: "swap", onClick: () => { setTryVal("1"); setDir("try"); } }, "1 ₺ = " + (rate ? fmt(rate, 4) : "…") + " ₸"),
+      field("kzt", kztShown, v => { setDir("kzt"); setKztVal(v); })),
+    h("div", { className: "chips" }, [100, 500, 1000, 5000].map(n =>
+      h("button", { key: n, onClick: () => { setDir("try"); setTryVal(String(n)); } }, fmt(n) + " ₺"))),
+    h("div", { className: "rate" },
+      h("div", null, h("small", null, "1 ₺ в тенге"), h("b", null, rate ? fmt(rate, 4) : "—")),
+      h("div", null, h("small", null, "1 000 ₸ в лирах"), h("b", null, rate ? fmt(1000 / rate, 2) : "—"))),
+    rate && h("div", { className: "table" }, [50, 100, 250, 1000, 2500].map(n =>
+      h("div", { key: n }, h("span", null, fmt(n) + " ₺"), h("span", null, fmt(n * rate, 0) + " ₸")))),
+    err && h("div", { className: "err" }, err),
+    h("div", { className: "meta" },
+      data ? ["Курс от ", time(data.at), " · источник ", data.source, h("br", { key: "b" }),
+              "Проверено ", time(data.fetched), " · автообновление каждую минуту · "] : "Загружаю курс… ",
+      h("button", { onClick: refresh }, "Обновить")));
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(h(App));
+if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
+</script>
+</body>
+</html>
